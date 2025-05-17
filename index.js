@@ -1,14 +1,20 @@
 const express = require("express");
-const { chromium } = require("playwright");
+const { chromium } = require("playwright-extra");
+const stealth = require("playwright-extra-plugin-stealth")();
+chromium.use(stealth);
+
 const app = express();
 const port = process.env.PORT || 3000;
 
-async function scrapeJobs() {
+async function scrapeJobs(searchTerm, location) {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
-  const searchUrl = "https://www.linkedin.com/jobs/search/?keywords=Graduate%20Trader&location=London%2C%20England%2C%20United%20Kingdom&f_AL=true";
 
-  await page.goto(searchUrl, { waitUntil: "networkidle" });
+  const searchUrl = `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(searchTerm)}&location=${encodeURIComponent(location)}&f_AL=true`;
+
+  await page.goto(searchUrl, { waitUntil: "networkidle", timeout: 60000 });
+
+  // Scroll to load more jobs
   await page.evaluate(async () => {
     for (let i = 0; i < 5; i++) {
       window.scrollBy(0, window.innerHeight);
@@ -16,6 +22,7 @@ async function scrapeJobs() {
     }
   });
 
+  // Scrape job data
   const jobs = await page.$$eval(".jobs-search-results__list-item", nodes =>
     nodes.map(node => {
       const title = node.querySelector("h3")?.innerText?.trim() || "N/A";
@@ -31,8 +38,11 @@ async function scrapeJobs() {
 }
 
 app.get("/scrape", async (req, res) => {
+  const searchTerm = req.query.term || "Graduate Trader";
+  const location = req.query.location || "London";
+
   try {
-    const jobs = await scrapeJobs();
+    const jobs = await scrapeJobs(searchTerm, location);
     res.json(jobs);
   } catch (error) {
     res.status(500).json({ error: "Scraping failed", details: error.message });
@@ -40,7 +50,7 @@ app.get("/scrape", async (req, res) => {
 });
 
 app.get("/", (req, res) => {
-  res.send("LinkedIn Scraper is running. Use /scrape to get data.");
+  res.send("LinkedIn Scraper is running. Use /scrape?term=YOUR_JOB&location=YOUR_CITY to get data.");
 });
 
 app.listen(port, () => {
